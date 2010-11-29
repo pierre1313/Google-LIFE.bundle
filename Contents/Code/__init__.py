@@ -34,9 +34,7 @@ def GetImage(sender, path):
 
 def searchResults(sender=None, url=''):
   url = url+'&biw=1024&bih=768'
-  Log(url)
   searchResults = HTML.ElementFromURL(url)
-  Log(HTML.StringFromElement(searchResults))
   if (HTML.StringFromElement(searchResults).find("did not match any documents") > 0) or (searchResults == None):
     return 0
     
@@ -82,13 +80,11 @@ def SectionsMenu(sender, sectionIndex = 0):
   dir = MediaContainer(title2="Sections")
 
   for item in HTML.ElementFromURL(GL_URL).xpath("//table/tr["+ str(sectionIndex*2) +"]/td/ul/li/a"): 
-    Log(item.get("href"))
     dir.Append(Function(DirectoryItem(searchResults, item.text),url=item.get("href")))
 
   return dir
 
 def Search(sender,query = None):
-  Log(query)
   response = searchResults(url = (GL_SEARCHURL + query + "+source:life&biw=1024&bih=768"))
   if response == 0:
     return MessageContainer("Error","This search query did not return any document.")
