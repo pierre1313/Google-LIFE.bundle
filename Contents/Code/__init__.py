@@ -1,111 +1,96 @@
-import sys
-from PMS import Plugin, Log, DB, Thread, XML, HTTP, Utils
-from PMS.MediaXML import *
-from PMS.Shorthand import _L, _R, _E, _D
+import sys,re
 
 GL_PLUGIN_PREFIX   = "/photos/Google-LIFE"
 GL_URL             = "http://images.google.com/hosted/life"
-GL_SEARCHURL       = "http://images.google.com/images?q="
+GL_SEARCHURL       = "http://images.google.com/images?client=safari&rls=en-us&q="
 
 GL_SEARCH_DEPTH    = 3 # number of search result pages to parse
 
 ####################################################################################################
 def Start():
-  Plugin.AddRequestHandler(GL_PLUGIN_PREFIX, HandlePhotosRequest, "Google LIFE Archive", "icon-default.png", "art-default.jpg")
-  Plugin.AddViewGroup("ImageStream", viewMode="Pictures", contentType="photos")
-  HTTP.__headers["User-agent"] = "Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10_5_6; en-gb) AppleWebKit/528.16 (KHTML, like Gecko) Version/4.0 Safari/528.16"  
+  Plugin.AddPrefixHandler(GL_PLUGIN_PREFIX, MainMenu, "Google LIFE Archive", "icon-default.png", "art-default.jpg")
+  Plugin.AddViewGroup("ImageStream", viewMode="Pictures", mediaType="photos")
+  MediaContainer.content = 'Items'
+  MediaContainer.art = R('art-default.jpg')
+  DirectoryItem.thumb = R('icon-default.png')
+  HTTP.CacheTime = 3600
+  HTTP.Headers["User-agent"] = "Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10_5_6; en-gb) AppleWebKit/528.16 (KHTML, like Gecko) Version/4.0 Safari/528.16"  
 
 ####################################################################################################
-
-def searchLoop(searchResults, dir):
-  #Log.Add(XML.ElementToString(searchResults))
-  searchResults = XML.ElementToString(searchResults)
-  #Log.Add(searchResults) 
-  searchResults = searchResults[searchResults.find("dyn.setResults")+17:]
-  searchResults = searchResults.split("],[")
-  for s in searchResults[1:]:
-    tmpS = s.replace("(","").replace(");","").replace('"',"")
-    #Log.Add(tmpS)
-    tmpS = tmpS.split(",")
-    id = HTTP.Unquote(tmpS[3])
-    #Log.Add(id)
-    thumb = id.replace("large","landing")
-    desc = tmpS[6].replace("\\x3cb\\x3e","").replace("\\x3c/b\\x3e","").replace("\\x26#39;","'")
-    dir.AppendItem(PhotoItem(id, desc, desc, thumb))
+def MainMenu():
+  dir = MediaContainer(title1="Google LIFE Archive")
+  dir.Append(Function(DirectoryItem(DecadesMenu, title = L("Decades"))))
+  i=0
+  for item in HTML.ElementFromURL(GL_URL).xpath("//h2"):
+    i+=1
+    if item.text != "Search tip":
+      dir.Append(Function(DirectoryItem(SectionsMenu, title = L(item.text)),sectionIndex = i))
+  dir.Append(Function(InputDirectoryItem(Search, L("Search Google:LIFE"), L("Search Google:LIFE"), thumb=R("search.png"))))
+ 
   return dir
   
-def searchResults(url, dir):
-  searchResults = XML.ElementFromString(HTTP.GetCached(url),True)
-  if searchResults.find("did not match any documents") > 0:
-    return None
-  #pull out the number of result pages
-  #Log.Add(HTTP.GetCached(url))
-  #Log.Add(url)
+def GetImage(sender, path):
+  return DataObject(HTTP.Request(path).content,'image/jpeg')
+
+def searchResults(sender=None, url=''):
+  url = url+'&biw=1024&bih=768'
+  Log(url)
+  searchResults = HTML.ElementFromURL(url)
+  Log(HTML.StringFromElement(searchResults))
+  if (HTML.StringFromElement(searchResults).find("did not match any documents") > 0) or (searchResults == None):
+    return 0
+    
   approxResults = searchResults.xpath("//div[@id='resultStats']")[0].text_content().replace(",","").replace('About ','')
   approxResults = approxResults[:approxResults.find(" ")]
   totalResultsPages = (int(approxResults) / 21) + 1 #imperfect need to see if this is exactly divisible by 20 or not 
   if totalResultsPages > GL_SEARCH_DEPTH: totalResultsPages = GL_SEARCH_DEPTH
   for x in range(totalResultsPages): #loop through search result pages
-    #Log.Add(x)
     if x > 0: # not the first time through, so skip and pass in the already retrieved searchResults html
       tmpSpot = url.find("&start=")+7
-      #Log.Add("tmpSpot: " + str(tmpSpot))
       if tmpSpot > 7:
         tmpSpotEnd = url.find("&",tmpSpot)
         if tmpSpotEnd == -1: tmpSpotEnd = len(url)
         lastSearchStart = url[tmpSpot:tmpSpotEnd]
-        #Log.Add("ls: " + lastSearchStart + " *** " + url)
         newSearchStart = str(int(lastSearchStart) + 20)
         url = url.replace("=" + lastSearchStart,"=" + newSearchStart)
       else: #first start results increment
         url = url + "&start=21"
-      searchResults = XML.ElementFromURL(url,True)  
-    dir = searchLoop(searchResults=searchResults, dir=dir)
-    
-  dir.SetViewGroup("ImageStream")
-  return dir
-  
-def HandlePhotosRequest(pathNouns, count):
-  GL_HOMEPAGE        = XML.ElementFromString(HTTP.GetCached(GL_URL), True)
-  #Log.Add(GL_HOMEPAGE)
-  try:
-    title2 = pathNouns[count-1].split("||")[1]
-    pathNouns[count-1] = pathNouns[count-1].split("||")[0]
-  except:
-    title2 = ""
-    
-  dir = MediaContainer("art-default.jpg", None, title1="Google LIFE Archive", title2=title2)
-  if count == 0:
-    dir.AppendItem(DirectoryItem("decades||" + _L("Decades"), _L("Decades"), ""))
-    i=0
-    for item in GL_HOMEPAGE.xpath("//h2"):
-      i+=1
-      if item.text != "Search tip":
-        dir.AppendItem(DirectoryItem("section_" + str(i) + "_" + item.text + "||" + _L(item.text), _L(item.text), ""))
-    dir.AppendItem(SearchDirectoryItem("search", _L("Search Google:LIFE"), _L("Search Google:LIFE"), _R("search.png")))
-    return dir.ToXML()
-  
-  if pathNouns[0][:7] == "decades":
-    if count == 1:
-      for item in GL_HOMEPAGE.xpath("//a[@class='tmb']//following-sibling::a"): #decades
-        dir.AppendItem(DirectoryItem(_E(item.get("href"))+"||"+item.text, item.text, ""))
-    if count == 2:
-      dir = searchResults(_D(pathNouns[1]),dir)
+      searchResults = HTML.ElementFromURL(url)      
+ 
+    dir = MediaContainer(viewGroup="ImageStream")
 
-  elif pathNouns[0][:8] == "section_":
-    if count == 1:
-      for item in GL_HOMEPAGE.xpath("//table/tr["+ str(int(pathNouns[0][8:9])*2) +"]/td/ul/li/a"): 
-        dir.AppendItem(DirectoryItem(_E(item.get("href")), item.text, ""))
-    if count == 2:
-      dir = searchResults(_D(pathNouns[1]),dir)
-  
-  elif pathNouns[0] == "search":
-   if count > 1:
-    query = pathNouns[1]
-    if count > 2:
-      for i in range(2, len(pathNouns)): query += "/%s" % pathNouns[i]
-    dir = searchResults(GL_SEARCHURL + query + "+source:life",dir) # example query=http://images.google.com/images?q=country+doctor+source:life
-    if dir.ChildCount() == 0:
-      dir.AppendItem(DirectoryItem("%s/search" % GL_PLUGIN_PREFIX, "(No Results)", ""))
-      
-  return dir.ToXML()
+    searchResults = XML.StringFromElement(searchResults.xpath("//div[@id='hd_1']")[0])
+    for s in searchResults.split(':['):
+      s=s.replace("(","").replace(");","").replace('"',"")
+      if s.find('id=hd_1') == -1: 
+        tmpS = s.split(",")
+        id = tmpS[3]
+        thumb = id.replace("large","thumb")
+        desc = tmpS[6].replace("\\x3cb\\x3e","").replace("\\x3c/b\\x3e","").replace("\\x26#39;","'")
+        dir.Append(Function(PhotoItem(GetImage, desc, subtitle=desc,summary=desc, thumb=thumb,ext='jpg'),path=id))
+  return dir
+
+def DecadesMenu(sender):    
+  dir = MediaContainer(title2="Decades")
+
+  for item in HTML.ElementFromURL(GL_URL).xpath("//a[@class='tmb']//following-sibling::a"): #decades
+    dir.Append(Function(DirectoryItem(searchResults, item.text, ""),url = item.get("href")))
+
+  return dir
+   
+def SectionsMenu(sender, sectionIndex = 0):
+  dir = MediaContainer(title2="Sections")
+
+  for item in HTML.ElementFromURL(GL_URL).xpath("//table/tr["+ str(sectionIndex*2) +"]/td/ul/li/a"): 
+    Log(item.get("href"))
+    dir.Append(Function(DirectoryItem(searchResults, item.text),url=item.get("href")))
+
+  return dir
+
+def Search(sender,query = None):
+  Log(query)
+  response = searchResults(url = (GL_SEARCHURL + query + "+source:life&biw=1024&bih=768"))
+  if response == 0:
+    return MessageContainer("Error","This search query did not return any document.")
+  else:
+    return response
