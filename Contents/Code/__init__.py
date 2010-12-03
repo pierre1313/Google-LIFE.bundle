@@ -25,7 +25,7 @@ def MainMenu():
     i+=1
     if item.text != "Search tip":
       dir.Append(Function(DirectoryItem(SectionsMenu, title = L(item.text)),sectionIndex = i))
-  dir.Append(Function(InputDirectoryItem(Search, L("Search Google:LIFE"), L("Search Google:LIFE"), thumb=R("search.png"))))
+  dir.Append(Function(InputDirectoryItem(Search, L("Search Google:LIFE"), L("Search Google:LIFE"), thumb=R("icon-search.png"))))
  
   return dir
   
