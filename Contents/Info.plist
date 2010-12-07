@@ -23,6 +23,6 @@
 	<key>PlexClientPlatforms</key>
 	<string>MacOSX</string>
 	<key>PlexPluginConsoleLogging</key>
-	<string>1</string>
+	<string>0</string>
 </dict>
 </plist>
