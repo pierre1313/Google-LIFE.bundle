@@ -1,5 +1,3 @@
-import sys,re
-
 GL_PLUGIN_PREFIX   = "/photos/Google-LIFE"
 GL_URL             = "http://images.google.com/hosted/life"
 GL_SEARCHURL       = "http://images.google.com/images?client=safari&rls=en-us&q="
