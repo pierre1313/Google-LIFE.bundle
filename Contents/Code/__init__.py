@@ -1,15 +1,15 @@
-import sys,re
+import re
 
 GL_PLUGIN_PREFIX   = "/photos/Google-LIFE"
 GL_URL             = "http://images.google.com/hosted/life"
-GL_SEARCHURL       = "http://images.google.com/images?client=safari&rls=en-us&q="
-
-GL_SEARCH_DEPTH    = 3 # number of search result pages to parse
+GL_API_URL         = 'https://ajax.googleapis.com/ajax/services/search/images?v=1.0&q=%s&rsz=8'
 
 ####################################################################################################
 def Start():
   Plugin.AddPrefixHandler(GL_PLUGIN_PREFIX, MainMenu, "Google LIFE Archive", "icon-default.png", "art-default.jpg")
+  Plugin.AddViewGroup("List", viewMode="List", mediaType="photos")
   Plugin.AddViewGroup("ImageStream", viewMode="Pictures", mediaType="photos")
+
   MediaContainer.content = 'Items'
   MediaContainer.art = R('art-default.jpg')
   DirectoryItem.thumb = R('icon-default.png')
@@ -25,54 +25,38 @@ def MainMenu():
     i+=1
     if item.text != "Search tip":
       dir.Append(Function(DirectoryItem(SectionsMenu, title = L(item.text)),sectionIndex = i))
-  dir.Append(Function(InputDirectoryItem(Search, L("Search Google:LIFE"), L("Search Google:LIFE"), thumb=R("search.png"))))
+  dir.Append(Function(InputDirectoryItem(Search, L("Search Google:LIFE"), L("Search Google:LIFE"), thumb=R("icon-search.png"))))
  
   return dir
   
 def GetImage(sender, path):
   return DataObject(HTTP.Request(path).content,'image/jpeg')
 
-def searchResults(sender=None, url=''):
-  url = url+'&biw=1024&bih=768'
-  searchResults = HTML.ElementFromURL(url)
-  if (HTML.StringFromElement(searchResults).find("did not match any documents") > 0) or (searchResults == None):
-    return 0
-    
-  approxResults = searchResults.xpath("//div[@id='resultStats']")[0].text_content().replace(",","").replace('About ','')
-  approxResults = approxResults[:approxResults.find(" ")]
-  totalResultsPages = (int(approxResults) / 21) + 1 #imperfect need to see if this is exactly divisible by 20 or not 
-  if totalResultsPages > GL_SEARCH_DEPTH: totalResultsPages = GL_SEARCH_DEPTH
-  for x in range(totalResultsPages): #loop through search result pages
-    if x > 0: # not the first time through, so skip and pass in the already retrieved searchResults html
-      tmpSpot = url.find("&start=")+7
-      if tmpSpot > 7:
-        tmpSpotEnd = url.find("&",tmpSpot)
-        if tmpSpotEnd == -1: tmpSpotEnd = len(url)
-        lastSearchStart = url[tmpSpot:tmpSpotEnd]
-        newSearchStart = str(int(lastSearchStart) + 20)
-        url = url.replace("=" + lastSearchStart,"=" + newSearchStart)
-      else: #first start results increment
-        url = url + "&start=21"
-      searchResults = HTML.ElementFromURL(url)      
- 
-    dir = MediaContainer(viewGroup="ImageStream")
+def remove_html_tags(data):
+    p = re.compile(r'<.*?>')
+    return p.sub('', data)
 
-    searchResults = XML.StringFromElement(searchResults.xpath("//div[@id='hd_1']")[0])
-    for s in searchResults.split(':['):
-      s=s.replace("(","").replace(");","").replace('"',"")
-      if s.find('id=hd_1') == -1: 
-        tmpS = s.split(",")
-        id = tmpS[3]
-        thumb = id.replace("large","thumb")
-        desc = tmpS[6].replace("\\x3cb\\x3e","").replace("\\x3c/b\\x3e","").replace("\\x26#39;","'")
-        dir.Append(Function(PhotoItem(GetImage, desc, subtitle=desc,summary=desc, thumb=thumb,ext='jpg'),path=id))
+def searchResults(sender=None, url=''):
+  dir = MediaContainer(viewGroup="ImageStream")
+  
+  for page in range(0,8):
+    jsonObject = JSON.ObjectFromURL(url+"&start="+str(8*page))
+  
+    if int(jsonObject['responseData']['cursor']['estimatedResultCount']) < (8*page):
+      break;
+    
+    for image in jsonObject['responseData']['results']:
+      dir.Append(Function(PhotoItem(GetImage, remove_html_tags(image['contentNoFormatting']), subtitle=image['contentNoFormatting'],summary=image['contentNoFormatting'], thumb=image['tbUrl'],ext='jpg'),path=image['unescapedUrl']))
+
   return dir
 
 def DecadesMenu(sender):    
   dir = MediaContainer(title2="Decades")
 
   for item in HTML.ElementFromURL(GL_URL).xpath("//a[@class='tmb']//following-sibling::a"): #decades
-    dir.Append(Function(DirectoryItem(searchResults, item.text, ""),url = item.get("href")))
+    href = item.get("href")
+    url = GL_API_URL % href[href.find('q=')+2:]
+    dir.Append(Function(DirectoryItem(searchResults, item.text, ""),url = url))
 
   return dir
    
@@ -80,12 +64,14 @@ def SectionsMenu(sender, sectionIndex = 0):
   dir = MediaContainer(title2="Sections")
 
   for item in HTML.ElementFromURL(GL_URL).xpath("//table/tr["+ str(sectionIndex*2) +"]/td/ul/li/a"): 
-    dir.Append(Function(DirectoryItem(searchResults, item.text),url=item.get("href")))
+    href = item.get("href")
+    url = GL_API_URL % href[href.find('q=')+2:]
+    dir.Append(Function(DirectoryItem(searchResults, item.text),url=url))
 
   return dir
 
 def Search(sender,query = None):
-  response = searchResults(url = (GL_SEARCHURL + query + "+source:life&biw=1024&bih=768"))
+  response = searchResults(url = (GL_API_URL % (String.Quote(query) + "+source:life")))
   if response == 0:
     return MessageContainer("Error","This search query did not return any document.")
   else:
